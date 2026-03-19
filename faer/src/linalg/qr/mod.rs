@@ -109,6 +109,8 @@
 //! ```
 pub mod col_pivoting;
 pub mod no_pivoting;
+#[cfg(feature = "rand")]
+pub mod sketched;
 #[cfg(test)]
 mod tests {
 	use crate as faer;
