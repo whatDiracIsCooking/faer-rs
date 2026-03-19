@@ -505,6 +505,59 @@ pub fn pseudoinverse_from_self_adjoint_evd_with_tolerance<T: ComplexField>(
 		}
 	}
 }
+/// computes the layout of the workspace required to compute the matrix
+/// exponential of a self-adjoint matrix, given the eigendecomposition
+pub fn expm_from_self_adjoint_evd_scratch<T: ComplexField>(
+	dim: usize,
+	par: Par,
+) -> StackReq {
+	_ = par;
+	temp_mat_scratch::<T>(dim, dim).array(2)
+}
+/// computes the matrix exponential of a self-adjoint matrix, given the
+/// eigendecomposition factors $S$ and $U$
+///
+/// the result is $\exp(A) = U \exp(S) U^H$
+#[track_caller]
+pub fn expm_from_self_adjoint_evd<T: ComplexField>(
+	expm: MatMut<'_, T>,
+	s: DiagRef<'_, T>,
+	u: MatRef<'_, T>,
+	par: Par,
+	stack: &mut MemStack,
+) {
+	let s = s.column_vector();
+	let mut expm = expm;
+	let n = u.ncols();
+	assert!(all(u.nrows() == n, u.ncols() == n, s.nrows() == n));
+	let (mut u_copy, stack) =
+		unsafe { temp_mat_uninit::<T, _, _>(n, n, stack) };
+	let (mut u_exp, _) = unsafe { temp_mat_uninit::<T, _, _>(n, n, stack) };
+	let mut u_copy = u_copy.as_mat_mut();
+	let mut u_exp = u_exp.as_mat_mut();
+	for j in 0..n {
+		let ref exp_sj = s[j].real().exp();
+		u_copy.rb_mut().col_mut(j).copy_from(u.col(j));
+		z!(u_exp.rb_mut().col_mut(j), u.col(j))
+			.for_each(|uz!(dst, src)| *dst = src.mul_real(exp_sj));
+	}
+	linalg::matmul::triangular::matmul(
+		expm.rb_mut(),
+		BlockStructure::TriangularLower,
+		Accum::Replace,
+		u_exp.rb(),
+		BlockStructure::Rectangular,
+		u_copy.rb().adjoint(),
+		BlockStructure::Rectangular,
+		one(),
+		par,
+	);
+	for j in 0..n {
+		for i in 0..j {
+			expm[(i, j)] = expm[(j, i)].conj();
+		}
+	}
+}
 fn dot2x1<T: RealField>(
 	lhs0: RowRef<'_, T>,
 	lhs1: RowRef<'_, T>,
@@ -1492,5 +1545,93 @@ mod self_adjoint_tests {
 		let pinv = mat.self_adjoint_eigen(Side::Lower).unwrap().pseudoinverse();
 		let err = &mat * &pinv - Mat::<f64>::identity(n, n);
 		assert!(err.norm_max() < 1e-10);
+	}
+	#[test]
+	fn test_expm_zero() {
+		for n in [1, 2, 4, 10, 20] {
+			let mat = Mat::<f64>::zeros(n, n);
+			let result =
+				mat.self_adjoint_eigen(Side::Lower).unwrap().expm();
+			let err = &result - Mat::<f64>::identity(n, n);
+			assert!(err.norm_max() < 1e-12);
+		}
+	}
+	#[test]
+	fn test_expm_identity() {
+		for n in [1, 2, 4, 10, 20] {
+			let mat = Mat::<f64>::identity(n, n);
+			let result =
+				mat.self_adjoint_eigen(Side::Lower).unwrap().expm();
+			let expected = Scale(core::f64::consts::E) * Mat::<f64>::identity(n, n);
+			let err = &result - &expected;
+			assert!(err.norm_max() < 1e-12);
+		}
+	}
+	#[test]
+	fn test_expm_inverse_real() {
+		let rng = &mut StdRng::seed_from_u64(0);
+		for n in [1, 2, 4, 10, 20, 50] {
+			let mat = CwiseMatDistribution {
+				nrows: n,
+				ncols: n,
+				dist: StandardNormal,
+			}
+			.rand::<Mat<f64>>(rng);
+			// scale down to keep eigenvalues moderate
+			let mat = Scale(1.0 / n as f64) * (&mat + mat.adjoint());
+			let neg_mat = Scale(-1.0) * &mat;
+			let exp_a =
+				mat.self_adjoint_eigen(Side::Lower).unwrap().expm();
+			let exp_neg_a =
+				neg_mat.self_adjoint_eigen(Side::Lower).unwrap().expm();
+			let product = &exp_a * &exp_neg_a;
+			let err = &product - Mat::<f64>::identity(n, n);
+			assert!(err.norm_max() < 1e-10);
+		}
+	}
+	#[test]
+	fn test_expm_inverse_cplx() {
+		let rng = &mut StdRng::seed_from_u64(0);
+		for n in [1, 2, 4, 10, 20, 50] {
+			let mat = CwiseMatDistribution {
+				nrows: n,
+				ncols: n,
+				dist: ComplexDistribution::new(
+					StandardNormal,
+					StandardNormal,
+				),
+			}
+			.rand::<Mat<c64>>(rng);
+			// scale down to keep eigenvalues moderate
+			let mat = Scale(c64::new(1.0 / n as f64, 0.0))
+				* (&mat + mat.adjoint());
+			let neg_mat = Scale(c64::new(-1.0, 0.0)) * &mat;
+			let exp_a =
+				mat.self_adjoint_eigen(Side::Lower).unwrap().expm();
+			let exp_neg_a =
+				neg_mat.self_adjoint_eigen(Side::Lower).unwrap().expm();
+			let product = &exp_a * &exp_neg_a;
+			let err = &product - Mat::<c64>::identity(n, n);
+			assert!(err.norm_max() < 1e-10);
+		}
+	}
+	#[test]
+	fn test_expm_diagonal() {
+		let n = 5;
+		let mut mat = Mat::<f64>::zeros(n, n);
+		for i in 0..n {
+			mat[(i, i)] = (i + 1) as f64;
+		}
+		let result =
+			mat.self_adjoint_eigen(Side::Lower).unwrap().expm();
+		for i in 0..n {
+			let expected = ((i + 1) as f64).exp();
+			assert!((result[(i, i)] - expected).abs() < 1e-12);
+			for j in 0..n {
+				if i != j {
+					assert!(result[(i, j)].abs() < 1e-12);
+				}
+			}
+		}
 	}
 }

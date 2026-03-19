@@ -1594,6 +1594,7 @@ pub trait RealField:
 	fn max_positive_impl() -> Self;
 	fn sqrt_min_positive_impl() -> Self;
 	fn sqrt_max_positive_impl() -> Self;
+	fn exp_impl(value: &Self) -> Self;
 }
 impl ComplexField for f32 {
 	type Arch = pulp::Arch;
@@ -2069,6 +2070,18 @@ impl RealField for f32 {
 	fn nbits_impl() -> usize {
 		Self::MANTISSA_DIGITS as usize
 	}
+
+	#[inline(always)]
+	fn exp_impl(value: &Self) -> Self {
+		#[cfg(feature = "std")]
+		{
+			Self::exp(*value)
+		}
+		#[cfg(not(feature = "std"))]
+		{
+			libm::expf(*value)
+		}
+	}
 }
 impl ComplexField for f64 {
 	type Arch = pulp::Arch;
@@ -2543,6 +2556,18 @@ impl RealField for f64 {
 	#[inline(always)]
 	fn nbits_impl() -> usize {
 		Self::MANTISSA_DIGITS as usize
+	}
+
+	#[inline(always)]
+	fn exp_impl(value: &Self) -> Self {
+		#[cfg(feature = "std")]
+		{
+			Self::exp(*value)
+		}
+		#[cfg(not(feature = "std"))]
+		{
+			libm::exp(*value)
+		}
 	}
 }
 impl<T: RealField<Unit: ComplexField>> ComplexField for Complex<T> {
@@ -4739,6 +4764,10 @@ impl RealField for Symbolic {
 	fn sqrt_max_positive_impl() -> Self {
 		Self
 	}
+
+	fn exp_impl(_: &Self) -> Self {
+		Self
+	}
 }
 impl ComplexField for Symbolic {
 	type Arch = pulp::Scalar;
@@ -5649,6 +5678,11 @@ impl RealField for fx128 {
 	fn sqrt_max_positive_impl() -> Self {
 		Quad::MIN_POSITIVE.recip().sqrt()
 	}
+
+	#[inline(always)]
+	fn exp_impl(value: &Self) -> Self {
+		value.exp()
+	}
 }
 pub mod ext {
 	use super::*;
@@ -5766,6 +5800,11 @@ pub mod ext {
 		}
 	}
 	pub trait RealFieldExt: RealField {
+		#[inline(always)]
+		#[must_use]
+		fn exp(&self) -> Self {
+			Self::exp_impl(self)
+		}
 		#[inline(always)]
 		#[must_use]
 		fn eps<T: RealField>() -> T {

@@ -1501,6 +1501,30 @@ impl<T: ComplexField> SelfAdjointEigen<T> {
 		);
 		pinv
 	}
+
+	/// returns the matrix exponential $\exp(A)$ of the original self-adjoint
+	/// matrix $A$.
+	///
+	/// computed as $U \exp(S) U^H$ where $A = U S U^H$ is the
+	/// eigendecomposition.
+	pub fn expm(&self) -> Mat<T> {
+		let U = self.U();
+		let S = self.S();
+		let n = self.nrows();
+		let par = get_global_parallelism();
+		let stack = &mut MemBuffer::new(
+			linalg::evd::expm_from_self_adjoint_evd_scratch::<T>(n, par),
+		);
+		let mut result = Mat::zeros(n, n);
+		linalg::evd::expm_from_self_adjoint_evd(
+			result.rb_mut(),
+			S,
+			U,
+			par,
+			MemStack::new(stack),
+		);
+		result
+	}
 }
 fn real_to_cplx<T: RealField>(
 	mut U: MatMut<'_, Complex<T>>,
