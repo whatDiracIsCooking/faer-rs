@@ -382,6 +382,18 @@ impl<
 	}
 
 	#[track_caller]
+	/// computes the PCA of `self`
+	///
+	/// rows are observations, columns are features.
+	/// if `n_components` is `None`, all `min(n, p)` components are kept.
+	pub fn pca(
+		&self,
+		n_components: Option<usize>,
+	) -> Result<crate::stats::Pca<C::Canonical>, SvdError> {
+		crate::stats::Pca::new(self.rb(), n_components)
+	}
+
+	#[track_caller]
 	/// returns the $L L^\top$ decomposition of `self`
 	pub fn llt(&self, side: Side) -> Result<Llt<C::Canonical>, LltError> {
 		Llt::new(self.rb(), side)

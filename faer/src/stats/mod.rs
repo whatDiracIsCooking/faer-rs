@@ -1,6 +1,8 @@
 #![allow(missing_docs)]
 mod meanvar;
+pub mod pca;
 pub use meanvar::{NanHandling, col_mean, col_varm, row_mean, row_varm};
+pub use pca::Pca;
 pub mod prelude {
 	pub use super::ComplexDistribution;
 	#[cfg(feature = "rand")]
