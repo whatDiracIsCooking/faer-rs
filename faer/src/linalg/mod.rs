@@ -223,6 +223,8 @@ pub fn temp_mat_zeroed<
 	)
 }
 pub mod cholesky;
+/// matrix polynomial evaluation
+pub mod polyval;
 pub mod evd;
 pub mod gevd;
 pub mod householder;
